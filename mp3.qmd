@@ -1,0 +1,325 @@
+---
+title: "Museum Maps"
+format: 
+  html:
+    fig-width: 8
+    fig-height: 5
+editor_options: 
+  chunk_output_type: console
+---
+
+*The code for this page can be found [here](https://github.com/kaisanilsson/kaisanilsson.github.io)*
+
+```{r}
+#| label: libraries
+#| include: false
+library(tidyverse)
+library(sf) #<1>
+library(leaflet)
+library(maps)
+library(viridis)
+library(htmltools)
+library(glue)
+library(forcats)
+```
+
+```{r}
+#| label: loading data
+#| include: false
+
+# museum data ------------------------------------------------------------------
+museum <- read_csv("2018_csv_museum_data_files/MuseumFile2018_File1_Nulls.csv")
+# from https://www.imls.gov/research-evaluation/data/museum-data-files
+
+# state names and abbreviation data --------------------------------------------
+state_names <- read_csv("state_names.csv")
+# from https://www.kaggle.com/datasets/francescopettini/us-state-names-codes-and-abbreviations
+
+# leaflet state geometry dataset -----------------------------------------------
+states_sf <- 
+  read_sf("https://rstudio.github.io/leaflet/json/us-states.geojson") |>
+  select(name, geometry)
+
+#state polygon (lat/long) dataset ----------------------------------------------
+states_polygon <- as_tibble(map_data("state")) |>
+  select(region, group, order, lat, long)
+
+```
+
+# Making maps
+
+These are chloropleth maps made in leaflet and ggplot of data regarding museums in the 48 contiguous US states (and the District of Columbia). The data was collected by the Institute of Museum and Library Services ([here](https://www.imls.gov/research-evaluation/data/museum-data-files)), last updated in 2018. Other datasets used were "US state names codes and Abbreviations" from Francesco Pettini on [kaggle](https://www.kaggle.com/datasets/francescopettini/us-state-names-codes-and-abbreviations) and the US state map data from the maps and leaflet libraries. 
+
+## Number of museums in each state
+
+```{r}
+#| label: finding total
+#| include: false
+
+#joining with state_names to get full state names in the dataset ---------------
+museum_full <- museum |>
+  right_join(state_names, by = c("ADSTATE" = "Alpha code")) # joining by the 
+                                                            # Alpha code (ex AZ)
+
+# generating the total count of museums per state ------------------------------
+museum_full <- museum_full |>
+  group_by(State) |>
+  mutate(total = n())
+```
+
+```{r}
+#| label: making mapping datasets
+#| include: false
+
+# leaflet dataset --------------------------------------------------------------
+museum_sf <- museum_full |>
+  right_join(states_sf, by = c("State" = "name")) |>
+  filter(!(State %in% c("Alaska", "Hawaii", "Puerto Rico"))) 
+# gets rid of states ouside of contiguous US
+
+# checking what states it includes
+unique(museum_sf$State) 
+
+# making ggplot dataset --------------------------------------------------------
+museum_polygon <- museum_full |> 
+  group_by(State) |>
+  mutate(State = str_to_lower(State)) |> # makes it lowercase to match
+  right_join(states_polygon, by = c("State" = "region"))
+
+# checking what states it includes
+unique(museum_polygon$State)
+```
+
+### Interactive map with leaflet
+
+```{r}
+#| label: creating the leaflet map
+
+# set up -----------------------------------------------------------------------
+# setting bins and customizing color scale
+bins = c(0, 20, 40, 80, 120, 160, 200, 260, 320, 400, 600, 800)
+pal <- colorBin(viridis(12), domain = museum_sf$total, bins = bins)
+#viridis(12) uses the viridis scale when making color bins
+
+# creating the labels
+museum_sf <- museum_sf |>
+  mutate(labels = str_c(State, ": ", total, " museums in total"))
+# produces strings like "Idaho: x museums in total"
+
+# making the labels html
+labels <- lapply(museum_sf$labels, HTML)
+
+# creates a floating legend of the data source - used
+#https://r-graph-gallery.com/package/leaflet.html
+# for help writing the original css code, then customised
+legend <- "
+<style>
+  .custom-legend {
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 5px;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+    transition: background-color 0.3s, transform 0.3s;
+    width: 300px;
+  }
+  .custom-legend:hover {
+    background-color: rgba(255, 255, 255, 0.9);
+    transform: scale(1.05);
+  }
+</style>
+<div>
+ <p>
+     Data source: Institute of Museum and Library Services, <a href = https://www.imls.gov/research-evaluation/data/museum-data-files>https://www.imls.gov/research-evaluation/data/museum-data-files</a>
+  </p>
+</div>"
+
+# changes the dataframe class to sf so it can be used in leaflet
+museum_sf <- st_as_sf(museum_sf)
+
+# making the map ---------------------------------------------------------------
+leaflet(museum_sf) |>
+  setView(-96, 37.8, 4) |>
+  addTiles() |>
+  addPolygons(
+    fillColor = ~pal(total), # fill thte state outlines with the palette
+    weight = 2, # border line weight
+    opacity = 1, # border fully opaque
+    color = "white", # white borders
+    dashArray = "3", # dashed borders
+    fillOpacity = 0.7, # makes the state fills slightly transparent
+    highlightOptions = highlightOptions( # options for mouse hovering
+      weight = 5, #heavier border
+      color = "white", # border color
+      dashArray = "", #undashed lines
+      fillOpacity = 0.7, #fill opacity stays the same
+      bringToFront = TRUE),
+    label = labels, # puts the labels on the map
+    labelOptions = labelOptions(
+      style = list("font-weight" = "normal", 
+                   padding = "3px 8px", # put a border around the text
+                   color = "black"), # text color
+      textsize = "15px",
+      direction = "auto")) |>
+  addLegend(pal = pal, values = ~total, opacity = 0.7, title = NULL, 
+    position = "bottomright") |> # puts a color legend on the map
+  addControl(html = legend, # adds the custom css legend/caption
+             position = "bottomleft", 
+             className = "custom-legend")
+```
+
+### Static map with ggplot
+
+```{r}
+#| label: creating the ggplot map 
+
+museum_polygon |>
+   ggplot(mapping = aes(x = long, y = lat, # maps the state shapes
+                          group = group)) + 
+  geom_polygon(aes(fill = total), color = "white", # white borders, fill scale
+               linewidth = 0.1) + 
+  labs(fill = "Number of Museums",
+       title = "Number of Museums in Each US State",
+       subtitle = "Excluding Alaska and Hawaii",
+       caption = "Data source: Institute of Museum and Library Services, https://www.imls.gov/research-evaluation/data/museum-data-files") +
+  coord_map() + 
+  theme_void() + #white background
+  scale_fill_viridis(trans = "log", breaks = c(50 ,150, 400)) 
+# rescales the fill scale so that smaller
+# values have more space in between them than larger ones
+```
+
+The three states with the most museums are New York, Texas, and California, with astronomically larger numbers than every other contiguous US state. The three states with the fewest museums are North Dakota, Maryland, and Vermont. Looking at the entire gradient of the map, it seems like East Coast states have more museums, and the numbers generally decreases as you move West.
+
+It's interesting to see that there is some similarity between population and museum count, since California and Texas--two states with the largest populations--also have the most museums. This is also the case for size -- two very small states, Maryland and Rhode Island, both have a smaller amount of museums. However, this isn't true across the board, since large Western states like Nevada have under 50, and many of the smaller Eastern states also have larger numbers.
+
+##  Most common museum locales
+
+The IMLS dataset also records the addresses of each museum and their associated NCES Urban-Centric Locale Codes classification. There are 4 levels: City (Territory inside an urbanized area and inside a principal city), Suburb (Territory inside an urbanized area but outside a principal city), Town (Territory inside an urban cluster that is outside an urbanized area) and Rural (Census-defined rural territory that is outside an urbanized area or urbanized cluster). The maps below show the most common of the four museum locales within each state.
+
+```{r}
+#| label: making leaflet mapping dataset
+#| warning: false
+#| include: false
+
+locale_sf <- museum_full |>
+  mutate(LOCALE4 = fct_recode(as.factor(LOCALE4), #renames the factor levels
+                              "City" = "1",
+                              "Suburb" = "2",
+                              "Town" = "3",
+                              "Rural" = "4")) |>
+  count(State, LOCALE4) |>
+  group_by(State) |>
+  slice_max(n, n = 1) |> # finds the most common locale by state
+  right_join(states_sf, by = c("State" = "name")) |> # joins with geometry data
+  filter(!(State %in% c("Alaska", "Hawaii", "Puerto Rico")))
+```
+
+### Interactive map with leaflet
+
+```{r}
+#| label: making the leaflet map
+
+# set up -----------------------------------------------------------------------
+# creating a custom palette with viridis
+pal <- colorFactor(viridis(3, begin = 0.1, end = 0.9), domain = locale_sf$LOCALE4)
+
+# creating labels
+locale_sf <- locale_sf |>
+  mutate(labels = str_c(State, "'s most common museum locale: ", LOCALE4))
+
+# making labels html
+labels <- lapply(locale_sf$labels, HTML)
+
+# making the dataframe class into sf so it can be used
+locale_sf <- st_as_sf(locale_sf)
+
+# making a legend (data source) box
+legend <- "
+<style>
+  .custom-legend {
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 5px;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+    transition: background-color 0.3s, transform 0.3s;
+    width: 300px;
+  }
+  .custom-legend:hover {
+    background-color: rgba(255, 255, 255, 0.9);
+    transform: scale(1.05);
+  }
+</style>
+<div>
+ <p>
+     Data source: Institute of Museum and Library Services, <a href = https://www.imls.gov/research-evaluation/data/museum-data-files>https://www.imls.gov/research-evaluation/data/museum-data-files</a>
+  </p>
+</div>"
+
+# leaflet map ------------------------------------------------------------------
+leaflet(locale_sf) |>
+  setView(-96, 37.8, 4) |>
+  addTiles() |>
+  addPolygons(
+    fillColor = ~pal(LOCALE4),
+    weight = 2,
+    opacity = 1,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlightOptions = highlightOptions(
+      weight = 5,
+      color = "white",
+      dashArray = "",
+      fillOpacity = 0.7,
+      bringToFront = TRUE),
+    label = labels,
+    labelOptions = labelOptions(
+      style = list("font-weight" = "normal", padding = "3px 8px", color = "black"),
+      textsize = "15px",
+      direction = "auto")) |>
+  addLegend(pal = pal, values = ~LOCALE4, opacity = 0.7, title = NULL,
+    position = "bottomright") |>
+  addControl(html = legend, position = "bottomleft", className = "custom-legend")
+# essentially the same code as the above leaflet map
+
+```
+
+```{r}
+#| label: making ggplot map dataset
+#| warning: false
+#| include: false
+
+locale_polygon <- museum_full |>
+  mutate(LOCALE4 = fct_recode(as.factor(LOCALE4),
+                              "City" = "1",
+                              "Suburb" = "2",
+                              "Town" = "3",
+                              "Rural" = "4")) |>
+  count(State, LOCALE4) |>
+  group_by(State) |>
+  slice_max(n, n = 1) |>
+  mutate(State = str_to_lower(State)) |>
+  right_join(states_polygon, by = c("State" = "region"))
+```
+
+### Static map with ggplot
+
+```{r}
+#| label: mapping ggplot
+
+locale_polygon |>
+   ggplot(mapping = aes(x = long, y = lat,
+                          group = group)) + 
+  geom_polygon(aes(fill = LOCALE4), color = "white", 
+               linewidth = 0.1) + 
+  labs(fill = "Most Common Museum Locale",
+       title = "Most Common Muesum Locales",
+       subtitle = "Excluding Alaska and Hawaii",
+       caption = "Data source: Institute of Museum and Library Services, https://www.imls.gov/research-evaluation/data/museum-data-files") +
+  coord_map() + 
+  theme_void() + 
+  scale_fill_viridis(discrete = TRUE, begin = 0.1, end = 0.9) + # makes the viridis scale discrete and moves the endpoints towards the middle
+  theme(legend.position = "bottom") # moves the legend to the bottom
+```
+
+This map shows a seemingly even split between City/urban and Rural locales as the most common, with a few suburban in the smaller East coast states. Interestingly, state size, population or region don't seem to come into it as much as they do with the number of museums. Some larger (and emptier) states like Wyoming and South Dakota have most musuems in rural areas, but other similar ones (like North Dakota) have most of their museums in cities. It would be interesting to see a direct comparison of which cities or rural areas museums are placed in -- does it have to do with the number of cities in a state or is there some other factor?

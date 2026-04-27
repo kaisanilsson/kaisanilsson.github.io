@@ -3,19 +3,20 @@ project:
   output-dir: docs
 
 website:
-  title: "kaisanilsson.github.io"
+  title: "Kaisa Nilsson"
   navbar:
     left:
       - href: index.qmd
         text: Home
-      - about.qmd
+      - href: mp1.qmd
+        text: Mini-Project 1
+      - mp3.qmd
 
 format:
   html:
-    theme:
-      - cosmo
-      - brand
-    css: styles.css
+    code-fold: true
+    theme: styles.scss
+    mainfont: 'Nunito Sans'
     toc: true
 
 

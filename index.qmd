@@ -1,7 +1,22 @@
 ---
 title: "Kaisa Nilsson"
+image: media/IMG_9249(1).jpg
 about:
-  template: solana
+  template: trestles
+  image-shape: round
+  image-width: 20em
+  links: 
+    - icon: github
+      href: https://github.com/kaisanilsson/
+format: 
+  html: 
+    theme: styles.scss
 ---
 
-Hi!
+Hi! I'm Kaisa Nilsson, originally from Boise, Idaho and now a junior at St. Olaf College in Northfield, Minnesota. This website is a landing site for my data science coding projects!
+
+Here are pictures of my dog, Ranger Sparkles:
+
+![](media/IMG_2120.jpeg)
+
+![Ranger in the foothills!](media/IMG_1971.jpg)

@@ -1,0 +1,33 @@
+/*-- scss:defaults --*/
+
+// Import fonts
+@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,200..1000;1,200..1000&family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap');
+
+// fonts
+$nunito: 'Nunito Sans', sans-serif; 
+$montserrat: 'Montserrat', sans-serif; 
+
+// Colors
+$lemonlime: #C8D96B;
+$ultramarine: #280086;
+$darkcoffee: #331B02;
+$palesky: #DDEFFF;
+$darkamaranth: #790D36;
+$ivory: #F9FBE9;
+$burntorange: #C54702;
+
+// Base document colors
+$navbar-bg: $lemonlime; // navbar
+$navbar-fg: $darkamaranth; // navbar foreground elements
+$navbar-hl: $burntorange; // highlight color when hovering over navbar links
+$body-bg: $palesky; // page background 
+$body-color: $darkcoffee; // page text 
+$footer-bg: $palesky; // footer 
+$link-color: $ultramarine; // hyperlinks 
+
+// Code blocks
+$code-block-bg: $palesky;
+
+.about-entity {
+  border-right: 1px solid $darkamaranth;
+}

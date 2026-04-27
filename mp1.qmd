@@ -1,0 +1,388 @@
+---
+title: "Mini Project 1: Analyzing Tales of the Brothers Grimm"
+---
+
+*The code for this page can be found [here](https://github.com/kaisanilsson/kaisanilsson.github.io)*
+
+```{r}
+#| label: setup
+#| include: FALSE
+
+# load libraries ----------------------------------------------
+# all libraries used throughout the document are collected here
+library(tidyverse) # general functions
+library(tidytext) # general text analysis
+library(textdata) # lexicon datasets?
+library(viridis) 
+library(ggthemes)
+library(igraph) # for network graphs
+library(ggraph) # for network graphs
+library(gutenbergr) # to download dataset
+library(knitr) # for tables
+
+# load dataset ------------------------------------------------
+grimm_raw <- gutenberg_download(5314) |>
+  distinct()
+
+write_csv(grimm_raw, "grimm_raw.csv")
+```
+
+# Introduction
+
+The data I will analyse is "Household Tales of Brothers Grimm" by Jacob and Wilhelm Grimm, translated by Margaret Hunt. It includes 210 stories, from the very classic ("Hansel and Gretel" or "Rapunzel") to the more obscure ("The Shroud"). The Brothers Grimm collected old German folk and fairy tales over a period of about four decades. As they collected new stories and published new collections, they revised, dropped, and added tales at will, to support their goals of preserving German culture reflecting current contexts[^1].
+
+[^1]: Zipes, Jack. “How the Grimm Brothers Saved the Fairy Tale.” National Endowment for the Humanities (NEH), Apr. 2015, www.neh.gov/humanities/2015/marchapril/feature/how-the-grimm-brothers-saved-the-fairy-tale.
+
+There are many questions that can be asked and answered about these stories through text analysis, but the ones I'm most interested in lean into the role of the Grimm's Tales in preserving and defining fairy tales. Is there a format to beginnings and endings of stories that seems to connected to the well known, formulaic "Once upon a time" and "Happily ever after"? What about other word formulas, like the wicked stepmother? The Grimm's fairy tales are often claimed to be dark--what does sentiment analysis say about this? How distinctive, really, are the stories?
+
+```{r}
+#| label: tidying data
+#| include: FALSE
+
+#puts words in individual rows but changes them all to LOWERCASE
+grimm_tidy <- grimm_raw |>
+  mutate(line = row_number()) |>
+  unnest_tokens(word, text, token = "words")
+
+#same code but keeps all cases with UPPERCASE
+grimm_tidy_upper <- grimm_raw |>
+  mutate(line = row_number()) |>
+  unnest_tokens(word_upper, text, token = "words", to_lower = FALSE)
+
+# stopwords --------------------------------------------------
+custom_stopwords <- tibble(
+  word = c("thee", "thy", "thou", "shalt", "wilt", "thyself", "thine", "thence", "art", "hast"),
+  lexicon = "custom")
+
+smart_stopwords <- get_stopwords(source = "smart")
+
+all_stopwords <- bind_rows(custom_stopwords, smart_stopwords) 
+
+# sentiments -------------------------------------------------
+nrc_sentiments <- get_sentiments(lexicon = "nrc")
+bing_sentiments <- get_sentiments(lexicon = "bing")
+
+# chapter wrangling for later --------------------------------
+
+# removes the table of contents, so only looking at the text of the stories
+grimm_chaps_only <- grimm_tidy_upper |>
+  slice(1732:285261)
+
+# adding chapter indicators to each line
+grimm_chapters <- grimm_raw |>
+  mutate(linenumber = row_number(),
+         chapter = cumsum(str_detect(text, 
+                                     regex("^\\d",
+                                           )))) |>
+  slice(218:21864)
+
+# takes the 10 chapters with the most lines
+top_10_chapters <- grimm_chapters |>
+  count(chapter) |>
+  slice_max(n, n = 10)
+
+
+```
+
+```{r}
+#| label: pdf display 1
+#| eval: FALSE
+
+grimm_chapters <- grimm_raw |>
+  mutate(linenumber = row_number(),
+         chapter = cumsum(str_detect(text, 
+                                     regex("^\\d",
+                                           )))) |>
+  slice(218:21864)
+```
+
+*This code displays one of the str_functions that I used (str_detect) and the regular expression "\^\\\\d".*
+
+# Names, Beginnings, and Endings
+
+The table below gives the top 20 proper nouns across this entire collection, based on frequency; although some are not names or even roles--see "Ah" "God" and "Good"--it's still interesting to note some frequencies.
+
+```{r}
+#| label: names/proper nouns
+#| echo: FALSE
+#| warning: FALSE
+
+# tibble -----------------------------------------------------
+# creates a tibble of proper nouns and counts (number of occurrences), ordered by count, excluding stopwords
+grimm_names <- as_tibble(grimm_chaps_only) |>
+  mutate(word = str_to_lower(word_upper)) |>
+  anti_join(all_stopwords) |>
+  mutate(proper_nouns = str_extract(word_upper, "[A-Z].*")) |>
+  drop_na() |>
+  group_by(proper_nouns) |>
+  summarize(count = n()) |>
+  arrange(desc(count)) |>
+  slice_max(count, n = 20)
+
+# table -----------------------------------------------------
+# makes tibble into a pretty formatted table
+kable(grimm_names, col.names = c("Proper Nouns", "Occurences"), caption = "Top 20 Proper Nouns by Frequency")
+```
+
+Many of the characters in the stories are named by their roles, rather than proper nouns, such as "the King", "the Queen" or "the King's daughter", which is easy to see from the far higher counts of those words. A more interesting point for me is the number of times "Hans" is counted-- since all the stories are fairly short, Hans must be a fairly classic name for protagonists of these tales, similarly to Grethel or Peter.
+
+```{r}
+#| label: pdf display 2
+#| eval: FALSE
+
+grimm_names <- as_tibble(grimm_chaps_only) |>
+  mutate(word = str_to_lower(word_upper)) |>
+  anti_join(all_stopwords) |>
+  mutate(proper_nouns = str_extract(word_upper, "[A-Z].*")) |>
+  drop_na() |>
+  group_by(proper_nouns) |>
+  summarize(count = n()) |>
+  arrange(desc(count)) |>
+  slice_max(count, n = 20)
+```
+
+*This code displays two other str_functions that I used (str_to_lower and str_extract) and the regular expression "\[A-Z\].\*".*
+
+One of the most classic fairy tale beginnings is "Once upon a time...". Since this collection was translated into English, there are some differences in names and phrases that may not have been in the original text. Still, there are some formulas for starting each tale.
+
+```{r}
+#| label: beginnings
+#| echo: FALSE
+
+# tibble -----------------------------------------------------
+# makes tibble of the most common first three words (top 10)
+beginnings <- grimm_raw |>
+  slice(218:22228) |> # gets rid of table of contents while in raw form
+  mutate(chap_title = str_detect(text, "\\d"), # detects lines beginning with numbers (chapters)
+         sentence_lead = lead(text), # moves the next line up by one, so chap_title and the first line of the chapter are in the same row
+         first_words = ifelse(chap_title == TRUE, 
+                              str_extract(sentence_lead, "^([^ ]+ ){3}"),
+                              NA)) |>
+  group_by(first_words) |>
+  drop_na() |>
+  summarize(count = n()) |>
+  arrange(desc(count)) |>
+  filter(count > 2)
+
+# table ------------------------------------------------------ 
+# turns tibble into a well formatted table
+kable(beginnings, col.names = c("First Three Words", "Occurences"), caption = "Most Frequent Opening Words")
+```
+
+The most common beginning phrase by far is "There was once" followed by "There were once", which is somewhat surprising given the stereotypical fairy tale beginning. However, that quintessential phrase returns in the third position, and there is clearly still a formula to the beginnings.
+
+```{r}
+#| label: pdf display 3
+#| eval: FALSE
+
+beginnings <- grimm_raw |>
+  slice(218:22228) |> 
+  mutate(chap_title = str_detect(text, "\\d"), 
+         sentence_lead = lead(text), 
+         first_words = ifelse(chap_title == TRUE, 
+                              str_extract(sentence_lead, "^([^ ]+ ){3}"),
+                              NA)) |>
+  group_by(first_words) |>
+  drop_na() |>
+  summarize(count = n()) |>
+  arrange(desc(count)) |>
+  filter(count > 2)
+```
+
+*This code shows two other regular expressions I used: "\\\\d" and "\^(\[\^ \]+ ){3}".*
+
+Next, we can look at the endings of chapters to see if there appears to be a similar formula.
+
+```{r}
+#| label: endings
+#| echo: FALSE
+
+# tibble -----------------------------------------------------
+# makes tibble of the most common last three words
+endings <- grimm_raw |>
+  slice(218:22228) |> 
+  mutate(chap_title = str_detect(text, "\\d"), 
+         sentence_lag = lag(text, default = "none"), # moves the next line down by one, so chap_title and the last line of the previous are in the same row -- first chapter has "none" as the last line
+         last_words = ifelse(chap_title == TRUE, 
+                              str_extract(sentence_lag, "([^ ]+ [^ ]+)$"),
+                              NA)) |>
+  group_by(last_words) |>
+  drop_na() |>
+  summarize(count = n()) |>
+  filter(count > 1) |>
+  arrange(desc(count))
+
+# table ------------------------------------------------------
+# turns tibble into a well formatted table
+kable(endings, col.names = c("Last Two Words", "Occurences"), caption = "Most Frequent Closing Words")
+```
+
+Here I looked at the last two words, since there appeared to be much more variability in endings than beginnings, and increasing the number led to only unique endings. Still, it's interesting to note that multiple stories had similar last words, especially focusing on death and life.
+
+```{r}
+#| label: pdf display 4
+#| eval: FALSE
+
+endings <- grimm_raw |>
+  slice(218:22228) |> 
+  mutate(chap_title = str_detect(text, "\\d"), 
+         sentence_lag = lag(text, default = "none"), 
+         last_words = ifelse(chap_title == TRUE, 
+                              str_extract(sentence_lag, "([^ ]+ [^ ]+)$"),
+                              NA)) |>
+  group_by(last_words) |>
+  drop_na() |>
+  summarize(count = n()) |>
+  filter(count > 1) |>
+  arrange(desc(count))
+```
+
+*This code displays the regular expression "(\[\^ \]+ \[\^ \]+)\$".*
+
+# Word Association
+
+We can extend our study of names to include many more words with a words association network graph. Excluding basic, common words like "and" (and those specific to this text, like "thou"), we can see the relationships between words that appear next to each other often. "king's son" and "king's daughter" have the darkest arrows, which follows from the initial discussion of roles as names, and the number of stories that must have those as main characters. The networks with only two nodes also reveal typical characters or concepts in stories, like "wise woman" and "spinning wheel".
+
+```{r}
+#| label: making bigram dataframe
+#| include: FALSE
+
+# turning the raw data into a tibble of bigrams
+grimm_bigram <- grimm_raw |>
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) |>
+  filter(bigram != "NA")
+
+# filtering to remove stopwords
+grimm_bigram_filtered <- grimm_bigram |>
+  separate(bigram, c("word1", "word2"), sep = " ") |>
+  filter(!word1 %in% all_stopwords$word,
+         !word2 %in% all_stopwords$word) |>
+  count(word1, word2, sort = TRUE)
+```
+
+```{r}
+#| label: graphing bigrams
+#| echo: FALSE
+#| out-width: "100%"
+
+#puts tibble in graph form
+grimm_bigram_graph <- grimm_bigram_filtered |>
+  filter(n > 10) |>
+  graph_from_data_frame()
+
+# Use ggraph to convert into a network plot
+# polish the graph
+set.seed(2020)
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+# actual graph
+ggraph(grimm_bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = arrow(length = unit(1.5, 'mm'), type = "closed"), # makes arrows longer, with solid heads (easier to see)
+                 end_cap = circle(.01, 'inches')) + # changes how close arrows are to node
+  geom_node_point(color = "#0d0887", size = 2) + # changes node size 
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1, size = 2) + # changes text size/position
+  theme_void() +
+  ggtitle("Network Plot of Two-Word Association in Grimm's Tales")
+```
+
+# Sentiment Analysis
+
+In comparison to some other fairy tale collections, and often the popular perception of tales from children's books or Disney, the Grimm's tales have a reputation for being violent and sometimes vengeful; one of the most classic examples is in "Snow White", when the wicked stepmother was forced to dance until she died in shoes of red-hot iron. I'm interested in asking what negative topics were focused on and what language was used--is it death, or are there other punishment words? Among positive words, I wanted to see if there was any clear juxtaposition with the most common negative words.
+
+In the figure below, it's clear that the most common words with negative sentiments are related to death, or hell--the devil. "fell" is an interesting case, since it is used in a negative way, but also to describe fortune, or the fall of hair, which I would argue are not negative. The positive-sentiment words are interesting, since there don't appear to be many contradictions, other than rich and poor. Instead, the top few are more judgment terms used to describe characters, rather than actions or concepts like the negative sentiment words.
+
+```{r}
+#| label: sentiments
+#| echo: FALSE
+#| warning: FALSE
+#| fig-alt: "This plot is two bar plots showing the top 10 most frequent words, split by positive and negative sentiment, with the word on the y axis and number of occurences on the x axis. The number of word occurences ranges from about 100 to about 500 appearences. The three most common negative sentiment words are fell, poor, and dead, and the three most common positive sentiment words are great, good and, beautiful. In general the positive sentiment words have a higher count for the number of occurences."
+
+#makes sentiment bar chart
+grimm_tidy |>
+  anti_join(all_stopwords) |>
+  inner_join(bing_sentiments, relationship = "many-to-many") |> # "many-to-many" gets rid of warnings so it will actually plot
+  count(sentiment, word, sort = TRUE) |>
+  group_by(sentiment) |>
+  slice_max(n, n = 10) |>
+  ungroup() |>
+  ggplot(aes(x = fct_reorder(word, n), y = n, fill = sentiment)) +
+    geom_col() +  
+    coord_flip() +
+    facet_wrap(~ sentiment, scales = "free") +
+    scale_fill_viridis_d(option = "C") + # viridis palette called plasma
+    labs(title = "Word Contribution to Positive/Negative Sentiments",
+         y = "Number of Occurences",
+         x = "Words",
+         fill = "Sentiment")
+
+```
+
+Overall, some of my initial assumptions about this analysis were proved true--there is a sort of formula to beginnings of the tales, although "Once upon a time" is not as prevalent. Through the plots of word sentiments and word association, some of the overall subjects become more clear--some of the stories may focus on death or the devil, but there are many more mentions of good or positive ideas as well. Both plots show how many things are described as "good" or "golden".
+
+With all of this analysis, looking beyond classic ideas of fairytales about princesses or fair maidens, it's clear to see why the tales of the Brothers Grimm have stayed so long in our culture. The positive sentiments far outweigh the negative, and there is a simplicity to stories about animals or sons or daughters or brothers that could be about anyone, even the sons or daughters or brothers of kings. The stories lasted long before being written down and still have until now for a reason: maybe, in the first words of the collection, we all want to read about "the old times when wishing still helped one"[^2].
+
+[^2]: Grimm, Jacob and Wilhelm. *Household Tales of Brothers Grimm*. Translated by Margaret Hunt. Project Gutenberg, 1 March 2022, https://www.gutenberg.org/files/5314/5314-h/5314-h.htm
+
+## Chapter Topics
+
+```{r}
+#| label: tf-idf dataframe
+#| include: FALSE
+
+# turning data from the top 10 wordiest chapters into a tibble of bigrams
+grimm_bigrams_chapter <- grimm_chapters |>
+  inner_join(top_10_chapters) |>
+  group_by(chapter) |>
+  mutate(linenumber = row_number()) |>
+  ungroup() |>
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) |>
+  filter(bigram != "NA")
+
+
+# filtering out stopwords
+grimm_chap_bigrams_filtered <- grimm_bigrams_chapter |>
+  separate(bigram, c("word1", "word2"), sep = " ") |>
+  filter(!word1 %in% all_stopwords$word,
+         !word2 %in% all_stopwords$word) |>
+  filter(!is.na(word1) & !is.na(word2))
+
+
+# combines the two words back into one bigram column
+chap_bigrams_united <- grimm_chap_bigrams_filtered |>
+  unite(bigram, word1, word2, sep = " ")
+
+
+# calculates tf-idf and saves as a tibble
+grimm_bigram_tf_idf <- chap_bigrams_united |>
+  count(chapter, bigram) |>
+  bind_tf_idf(bigram, chapter, n) |>
+  arrange(desc(tf_idf)) 
+```
+
+```{r}
+#| label: tf-idf graphing
+#| echo: FALSE
+#| fig-height: 10
+#| fig-width: 10
+
+#graphs words by largest tf-idf-score by chapter
+grimm_bigram_tf_idf |>
+  group_by(chapter) |>
+  arrange(desc(tf_idf)) |>
+  slice_max(tf_idf, n = 10, with_ties = FALSE) |> #with_ties gets rid of ties, so there are exactly 10 bigrams selected
+  ungroup() |>
+  ggplot(aes(x = fct_reorder(bigram, tf_idf), 
+             y = tf_idf, 
+             fill = as.factor(chapter))) +
+    geom_col(show.legend = FALSE) +
+    coord_flip() +
+    facet_wrap(~chapter, scales = "free") +
+    scale_fill_viridis_d(option = "C") +
+    labs(title = "Bigrams associated uniquely with each of the 10 longest tales",
+         x = "Bigrams",
+         y = "TF-IDF Score")
+```
+
+Although this is not part of my main analysis in the interest of length, I thought it was too interesting (and took too much work) not to include. See if the bigrams are distinct enough to tell what the stories are about! At least one should be readily obvious to anyone who has watched Disney films.
+
