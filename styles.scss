@@ -44,3 +44,12 @@ $code-block-bg: $palesky;
 p {
   font-family: $montserrat;
 }
+
+
+h2 {
+  border-bottom: 1px solid $darkamaranth;
+}
+
+#quarto-appendix.default {
+  border-top: 1px solid $darkamaranth;
+}
