@@ -23,11 +23,24 @@ $navbar-hl: $burntorange; // highlight color when hovering over navbar links
 $body-bg: $palesky; // page background 
 $body-color: $darkcoffee; // page text 
 $footer-bg: $palesky; // footer 
+$footer-fg: $darkcoffee; // footer text
 $link-color: $ultramarine; // hyperlinks 
 
 // Code blocks
 $code-block-bg: $palesky;
 
+
+/*-- scss:rules --*/
+
 .about-entity {
   border-right: 1px solid $darkamaranth;
+}
+
+.navbar-logo {
+  max-height: 55px;
+  width: auto;
+}
+
+p {
+  font-family: $montserrat;
 }

@@ -5,12 +5,16 @@ project:
 website:
   title: "Kaisa Nilsson"
   navbar:
+    title: false
+    logo: media/Kaisa2.png
     left:
       - href: index.qmd
         text: Home
       - href: mp1.qmd
         text: Mini-Project 1
       - mp3.qmd
+  page-footer:
+    left: Logo from [Nasa's Landsat images](https://science.nasa.gov/mission/landsat/outreach/your-name-in-landsat/)
 
 format:
   html:
