@@ -323,3 +323,112 @@ locale_polygon |>
 ```
 
 This map shows a seemingly even split between City/urban and Rural locales as the most common, with a few suburban in the smaller East coast states. Interestingly, state size, population or region don't seem to come into it as much as they do with the number of museums. Some larger (and emptier) states like Wyoming and South Dakota have most musuems in rural areas, but other similar ones (like North Dakota) have most of their museums in cities. It would be interesting to see a direct comparison of which cities or rural areas museums are placed in -- does it have to do with the number of cities in a state or is there some other factor?
+
+## Individual Museums and Types
+
+This map colors the states by the most common type of museum, of six: Art Museum, Arboretum, Botanical Garden, or Nature Center, Children's Museum, History Museum, Natural History or Natural Science Museum, Science & Technology Museum or Planetarium, and Zoo, Aquarium, or Wildlife Conservation Organization. Each point is a specific museums's location, with the museum type. You can zoom in and hover over the points to find out about them!
+
+```{r}
+#| label: data set up
+#| include: false
+
+# data wrangling, making new vars-----------------------------------------------
+disci_df <- museum_sf |>
+  group_by(State, DISCIPL) |>
+  mutate(n = n()) |> # gets counts of DISCIPL values like above, but manually
+  group_by(State) |>
+  mutate(largest = max(n), # highest type count
+         most_common = DISCIPL[largest == n][2], #new column of the most common discipline by state
+         full_name = fct_recode(as.factor(DISCIPL), # renames for clarity
+                                "Art Museum" = "ART",
+                                "Arboretum, Botanical Garden, or Nature
+Center" = "BOT",
+                                "Children's Museum" = "CMU",
+                                "History Museum" = "HST",
+                                "Natural History or Natural Science Museum" = "NAT",
+                                "Science & Technology Museum or
+Planetarium" = "SCI",
+                                "Zoo, Aquarium, or Wildlife Conservation Organization" = "ZAW")) |>
+  select(State, n, largest, most_common, DISCIPL, COMMONNAME, LONGITUDE, LATITUDE, geometry, full_name) |> # selects fewer relevant variables
+  # below is just replacing all the non-UTF-8 chars and weird spacing
+  mutate(COMMONNAME = str_replace_all(COMMONNAME, fixed(c("\x96" = "-", 
+                                                          "\x92" = "'",
+                                                          "\xd1" = "ñ",
+                                                          "\xa0" = " ",
+                                                          "\xc9" = "é",
+                                                          "\xd6" = "ö"))),
+         COMMONNAME = str_replace_all(COMMONNAME, " $", ""),
+         COMMONNAME = case_when(COMMONNAME == "FONTBONNE UNIVERSITY GALLERY OF ART'S" ~ "FONTBONNE UNIVERSITY GALLERY OF ARTS", .default = COMMONNAME))
+  
+#labs and color set up ---------------------------------------------------------
+unique(disci_df$most_common) # to find numbers for the palette
+
+# custom discrete palette w/ viridis
+pal <- colorFactor(viridis(2, begin = 0.4, end = 0.6), domain = disci_df$most_common)
+
+# making labels
+disci_df <- disci_df |>
+  mutate(labels = str_c(str_to_title(COMMONNAME), " is ", ifelse(str_detect(full_name, "^[AEIOU]"), "an ", "a "), full_name))
+
+# applying HTML to labels 
+labels <- lapply(disci_df$labels, HTML)
+
+# making the legend of the source
+legend <- "
+<style>
+  .custom-legend {
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 5px;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+    transition: background-color 0.3s, transform 0.3s;
+    width: 300px;
+  }
+  .custom-legend:hover {
+    background-color: rgba(255, 255, 255, 0.9);
+    transform: scale(1.05);
+  }
+</style>
+<div>
+ <p>
+     Data source: Institute of Museum and Library Services, <a href = https://www.imls.gov/research-evaluation/data/museum-data-files>https://www.imls.gov/research-evaluation/data/museum-data-files</a>
+  </p>
+</div>"
+
+# turning dataframe into sf so it can be used in leaflet
+disci_sf <- st_as_sf(disci_df)
+```
+
+```{r} 
+#| label: individual museum map
+#| warning: false
+
+leaflet(disci_sf) |>
+  setView(-96, 37.8, 4) |>
+  addTiles() |>
+  addPolygons(
+    fillColor = ~pal(most_common),
+    weight = 2,
+    opacity = 1,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7) |>
+  addCircles(lng = ~LONGITUDE, 
+             lat = ~LATITUDE, 
+             radius = 1, 
+             color = "#440154",
+             fillColor = "#440154",
+             fillOpacity = 0.7,
+    highlightOptions = highlightOptions(
+      color = "white",
+      fillColor = "white",
+      bringToFront = TRUE),
+    label = labels,
+    labelOptions = labelOptions(
+      style = list("font-weight" = "normal", padding = "3px 8px", color = "black"),
+      textsize = "15px",
+      direction = "auto")) |>
+  addLegend(pal = pal, values = ~most_common, opacity = 0.7, title = "Most Common Museum Type", labels = c("Art", "History"),
+    position = "bottomright") |>
+  addControl(html = legend, position = "bottomleft", className = "custom-legend")
+```
